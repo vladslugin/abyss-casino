@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import * as CANNON from 'cannon-es';
 
 const $ = s => document.querySelector(s);
 const F = window.Fair;
@@ -80,72 +81,105 @@ const pipMats = faceValues.map(v => new THREE.MeshStandardMaterial({
     map: pipTexture(v), roughness: 0.55, metalness: 0.05,
 }));
 
-// orientation that puts value V face-up
-const up = {};
-{
-    const e = (x, y, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
-    up[1] = e(0, 0, 0);
-    up[6] = e(Math.PI, 0, 0);
-    up[2] = e(-Math.PI / 2, 0, 0);
-    up[5] = e(Math.PI / 2, 0, 0);
-    up[3] = e(0, 0, Math.PI / 2);
-    up[4] = e(0, 0, -Math.PI / 2);
+// ── physics ───────────────────────────────────────────────────────────────────
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -14, 0) });
+world.defaultContactMaterial.restitution = 0.45;   // how bouncy
+world.defaultContactMaterial.friction = 0.28;
+world.allowSleep = false;
+
+// static table top at y = 0, plus invisible walls so dice stay on it
+const tableBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Box(new CANNON.Vec3(6, 0.4, 4.5)) });
+tableBody.position.set(0, -0.4, 0);
+world.addBody(tableBody);
+for (const [x, z, hx, hz] of [[5.6, 0, 0.3, 4.5], [-5.6, 0, 0.3, 4.5], [0, 4.2, 6, 0.3], [0, -4.2, 6, 0.3]]) {
+    const w = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Box(new CANNON.Vec3(hx, 2, hz)) });
+    w.position.set(x, 1, z);
+    world.addBody(w);
 }
 
+const HALF = 0.7;
 function makeDie() {
-    const m = new THREE.Mesh(new RoundedBoxGeometry(1.4, 1.4, 1.4, 5, 0.22), pipMats);
-    m.castShadow = true;
-    scene.add(m);
-    return m;
+    const mesh = new THREE.Mesh(new RoundedBoxGeometry(1.4, 1.4, 1.4, 5, 0.22), pipMats);
+    mesh.castShadow = true;
+    scene.add(mesh);
+    const body = new CANNON.Body({ mass: 1, shape: new CANNON.Box(new CANNON.Vec3(HALF, HALF, HALF)) });
+    body.linearDamping = 0.04;
+    body.angularDamping = 0.06;
+    world.addBody(body);
+    return { mesh, body };
 }
 const dice = [makeDie(), makeDie()];
-const restY = 0.7;
-dice[0].position.set(-1.6, restY, 0.4);
-dice[1].position.set(1.6, restY, -0.2);
-dice.forEach(d => d.quaternion.copy(up[1]));
 
-// ── roll animation to a predetermined face ────────────────────────────────────
-const easeOut = t => 1 - Math.pow(1 - t, 3);
-function animateRoll(values, onDone) {
-    const T = 1700;
-    const start = performance.now();
-    const setups = dice.map((d, i) => {
-        const axis = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
-        const spin = Math.PI * 2 * (3 + Math.floor(Math.random() * 3)) + Math.random() * Math.PI;
-        const fromX = (i ? 2.6 : -2.6) + (Math.random() - .5);
-        const toX = (i ? 1.6 : -1.6) + (Math.random() - .5) * 0.4;
-        const toZ = (i ? -0.2 : 0.4) + (Math.random() - .5) * 0.4;
-        return { axis, spin, target: up[values[i]].clone(), fromX, toX, toZ };
+// which value ends up on top, read from an orientation
+const faceDirs = [
+    { n: new THREE.Vector3(1, 0, 0), v: 3 }, { n: new THREE.Vector3(-1, 0, 0), v: 4 },
+    { n: new THREE.Vector3(0, 1, 0), v: 1 }, { n: new THREE.Vector3(0, -1, 0), v: 6 },
+    { n: new THREE.Vector3(0, 0, 1), v: 2 }, { n: new THREE.Vector3(0, 0, -1), v: 5 },
+];
+const _v = new THREE.Vector3(), _q = new THREE.Quaternion();
+function topFace(q) {
+    _q.set(q.x, q.y, q.z, q.w);
+    let best = -2, val = 1;
+    for (const f of faceDirs) { const y = _v.copy(f.n).applyQuaternion(_q).y; if (y > best) { best = y; val = f.v; } }
+    return val;
+}
+function syncMeshes() {
+    for (const d of dice) { d.mesh.position.copy(d.body.position); d.mesh.quaternion.copy(d.body.quaternion); }
+}
+
+const rand = (a, b) => a + Math.random() * (b - a);
+function randomThrow() {
+    return dice.map((_, i) => ({
+        pos: [(i ? 1.7 : -1.7) + rand(-.4, .4), rand(4.2, 6), rand(-1.2, 1.2)],
+        q: new CANNON.Quaternion().setFromEuler(rand(0, 6.28), rand(0, 6.28), rand(0, 6.28)),
+        vel: [rand(-2, 2), rand(0, 1.2), rand(-2, 2)],
+        av: [rand(-11, 11), rand(-11, 11), rand(-11, 11)],
+    }));
+}
+function applyThrow(t) {
+    dice.forEach((d, i) => {
+        const c = t[i];
+        d.body.position.set(...c.pos);
+        d.body.quaternion.copy(c.q);
+        d.body.velocity.set(...c.vel);
+        d.body.angularVelocity.set(...c.av);
     });
-    function frame(now) {
-        const t = Math.min((now - start) / T, 1);
-        const e = easeOut(t);
-        dice.forEach((d, i) => {
-            const s = setups[i];
-            // position: horizontal ease + a couple of damped bounces settling to rest
-            d.position.x = s.fromX + (s.toX - s.fromX) * e;
-            d.position.z = s.toZ * e;
-            const bounce = Math.abs(Math.cos(t * Math.PI * 2.5)) * (1 - e);
-            d.position.y = restY + 5.2 * (1 - e) * (1 - e) + bounce * 1.4;
-            // orientation: extra spin that decays into the target face
-            const angle = (1 - e) * s.spin;
-            d.quaternion.copy(s.target).premultiply(new THREE.Quaternion().setFromAxisAngle(s.axis, angle));
-        });
-        renderer.render(scene, camera);
-        if (t < 1) requestAnimationFrame(frame);
-        else { dice.forEach((d, i) => d.quaternion.copy(setups[i].target)); renderer.render(scene, camera); onDone(); }
+}
+const asleep = () => dice.every(d =>
+    d.body.velocity.length() < 0.08 && d.body.angularVelocity.length() < 0.08);
+
+// headless simulation — where does this throw land?
+function simulate(t) {
+    applyThrow(t);
+    for (let i = 0; i < 480; i++) { world.step(1 / 60); if (i > 40 && asleep()) break; }
+    return dice.map(d => topFace(d.body.quaternion));
+}
+// pick a real throw that happens to land on the fair result
+function findThrow(d1, d2) {
+    for (let k = 0; k < 500; k++) {
+        const t = randomThrow();
+        const [a, b] = simulate(t);
+        if (a === d1 && b === d2) return t;
     }
-    requestAnimationFrame(frame);
+    return randomThrow();
+}
+// play it for real, with rendering
+function playThrow(t, onDone) {
+    applyThrow(t);
+    let steps = 0;
+    (function frame() {
+        world.step(1 / 60); syncMeshes(); renderer.render(scene, camera); steps++;
+        if (steps < 480 && !(steps > 40 && asleep())) requestAnimationFrame(frame);
+        else onDone();
+    })();
 }
 
-function idleRender() {
-    if (!state.rolling) {
-        const t = performance.now() / 1000;
-        dice.forEach((d, i) => { d.position.y = restY + Math.sin(t * 1.4 + i) * 0.05; });
-        renderer.render(scene, camera);
-    }
-    requestAnimationFrame(idleRender);
-}
+// settle dice at rest for the idle view
+applyThrow(randomThrow());
+for (let i = 0; i < 300; i++) { world.step(1 / 60); if (i > 40 && asleep()) break; }
+syncMeshes();
+
+function idleRender() { renderer.render(scene, camera); requestAnimationFrame(idleRender); }
 
 // ── game ──────────────────────────────────────────────────────────────────────
 function outcome(sum, bet) {
@@ -177,7 +211,8 @@ async function roll() {
     setPhase('rolling', 'rolling');
 
     const [d1, d2] = await F.diceRoll(state.serverSeed, $('#clientSeed').value, state.nonce);
-    animateRoll([d1, d2], () => {
+    const t = findThrow(d1, d2);   // pre-simulate to a throw that lands on the fair result
+    playThrow(t, () => {
         const sum = d1 + d2;
         const win = outcome(sum, state.bet);
         $('#sum').textContent = String(sum);
