@@ -27,10 +27,18 @@ async function crashPoint(serverSeed, clientSeed, nonce) {
   return Number(x100) / 100;
 }
 
+// Two dice (1-6 each) from one round HMAC.
+async function diceRoll(serverSeed, clientSeed, nonce) {
+  const digest = await hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}`);
+  const d1 = (parseInt(digest.slice(0, 8), 16) % 6) + 1;
+  const d2 = (parseInt(digest.slice(8, 16), 16) % 6) + 1;
+  return [d1, d2];
+}
+
 function randomHex(bytes = 32) {
   const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, randomHex };
+window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, randomHex };

@@ -11,7 +11,7 @@ round can be independently checked with cryptographic proof.
 | Game | Status | House edge |
 |------|--------|-----------|
 | Crash | Live | 1.00% |
-| Dice | Planned | 1.00% |
+| Dice | Live | 1.00% |
 | Mines | Planned | 1.00% |
 | Plinko | Planned | 1.00% |
 
@@ -83,7 +83,7 @@ python -m http.server 8000
 # open http://localhost:8000
 ```
 
-No dependencies beyond the Python standard library.
+The Python side has no dependencies beyond the standard library. Dice loads three.js from a CDN in the browser.
 
 ## License
 
