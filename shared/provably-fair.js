@@ -72,10 +72,27 @@ async function minesField(serverSeed, clientSeed, nonce, mineCount, tiles = 25) 
   return order.slice(0, mineCount).sort((a, b) => a - b);
 }
 
+// Slot: a deterministic stream of `count` symbol indices drawn from the round
+// HMAC by cumulative weights — enough for the initial 5x5 grid and every cascade
+// refill. The whole spin (board + cascades) replays from the revealed seed.
+async function slotStream(serverSeed, clientSeed, nonce, weights, count = 525) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  const cum = []; { let s = 0; for (const w of weights) { s += w; cum.push(s); } }
+  const out = [];
+  let block = "", pos = 0, ctr = 0;
+  for (let i = 0; i < count; i++) {
+    if (pos + 4 > block.length) { block = await hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${ctr++}`); pos = 0; }
+    const r = parseInt(block.slice(pos, pos + 4), 16) % total; pos += 4;
+    let sym = 0; while (cum[sym] <= r) sym++;
+    out.push(sym);
+  }
+  return out;
+}
+
 function randomHex(bytes = 32) {
   const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, plinkoRoll, minesField, randomHex };
+window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, plinkoRoll, minesField, slotStream, randomHex };
