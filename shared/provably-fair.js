@@ -53,10 +53,29 @@ async function plinkoRoll(serverSeed, clientSeed, nonce, rows = 12) {
   return { path, slot, portalRow, portalPos, portalHit };
 }
 
+// Mines: which tiles hide bombs. A deterministic Fisher-Yates shuffle keyed by
+// the round HMAC picks `mineCount` positions out of `tiles`. Rejection sampling
+// keeps it unbiased; the keystream extends with a counter if a block runs out.
+async function minesField(serverSeed, clientSeed, nonce, mineCount, tiles = 25) {
+  const order = [...Array(tiles).keys()];
+  let block = "", pos = 0, ctr = 0;
+  async function byte() {
+    if (pos >= block.length) { block = await hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}:${ctr++}`); pos = 0; }
+    const b = parseInt(block.slice(pos, pos + 2), 16); pos += 2; return b;
+  }
+  for (let i = tiles - 1; i > 0; i--) {
+    const range = i + 1, limit = 256 - (256 % range);
+    let r; do { r = await byte(); } while (r >= limit);
+    const j = r % range;
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order.slice(0, mineCount).sort((a, b) => a - b);
+}
+
 function randomHex(bytes = 32) {
   const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, plinkoRoll, randomHex };
+window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, plinkoRoll, minesField, randomHex };
