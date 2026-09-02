@@ -35,10 +35,28 @@ async function diceRoll(serverSeed, clientSeed, nonce) {
   return [d1, d2];
 }
 
+// Plinko: a left/right path down N rows, the landing slot, and a bonus portal
+// sitting on the path (row + position). If the ball passes through the portal
+// its multiplier is doubled. Everything comes from one round HMAC.
+async function plinkoRoll(serverSeed, clientSeed, nonce, rows = 12) {
+  const digest = await hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}`);
+  let pool = BigInt("0x" + digest);
+  const path = [];
+  for (let i = 0; i < rows; i++) { path.push(Number(pool & 1n)); pool >>= 1n; }
+  const slot = path.reduce((a, b) => a + b, 0);
+
+  const portalRow = 3 + Number(pool % 7n); pool >>= 3n;   // rows 3..9
+  const portalPos = Number(pool % BigInt(portalRow + 1)); pool >>= 4n;
+  const ballPos = path.slice(0, portalRow).reduce((a, b) => a + b, 0);
+  const portalHit = ballPos === portalPos;
+
+  return { path, slot, portalRow, portalPos, portalHit };
+}
+
 function randomHex(bytes = 32) {
   const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, randomHex };
+window.Fair = { sha256Hex, hmacSha256Hex, commitment, crashPoint, diceRoll, plinkoRoll, randomHex };
