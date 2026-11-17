@@ -22,36 +22,54 @@ Standard commit–reveal:
 ```
 1. Server publishes  SHA256(server_seed)   before any bet          (commitment)
 2. Player sets their own  client_seed                              (no cherry-picking)
-3. outcome = f(server_seed, client_seed, nonce)  via HMAC-SHA256
+3. outcome = f(server_seed, client_seed, nonce)
 4. Server reveals server_seed afterwards:
      re-hash it   -> must equal the commitment   (seed not swapped)
      recompute it -> must equal the outcome       (round not rigged)
 ```
 
+Crash derives the outcome from `SHA256("server_seed:client_seed:nonce")`, exactly as
+the TON contract [ton-abyss](https://github.com/vladslugin/ton-abyss) does, so its
+`crashPoint` getter returns the same multiplier for any revealed round. The other
+games use HMAC-SHA256 keyed with the server seed.
+
 A seed chain (`seed[i] = SHA256(seed[i+1])`, played tail-first) commits to
-every future round with a single published hash, so rounds cannot be inserted
-or reordered.
+every future round with a single published hash, `SeedChain.terminating_hash`:
+the SHA-256 of the first seed played. Rounds cannot be inserted or reordered.
 
 ### Crash multiplier
 
-Exact closed form in integer arithmetic, 1% edge folded into the distribution:
+Exact closed form in integer arithmetic, the same as in the contract:
 
 ```
-h        = top 52 bits of HMAC-SHA256(server_seed, "client_seed:nonce")
-crash    = max(1.00, floor((100·2⁵² − h) / (2⁵² − h)) / 100)
+h        = top 52 bits of SHA256("server_seed:client_seed:nonce")
+crash    = max(1.00, floor(99·2⁵² / (2⁵² − h)) / 100)
 ```
 
-The multiplier is `1.00×` exactly when `h < 2⁵²/100` — a clean 1% of rounds.
+`P(crash ≥ t) = 0.99 / t`, so a bet on any target from 1.01× returns 0.99 on
+average: a 1% edge for every target. About 1.98% of rounds end at 1.00×.
+An auto cash-out exactly at the crash point wins, as in the contract.
+
+The first version used `(100·2⁵² − h) / (2⁵² − h)` and called its 1% of instant
+crashes the house edge. The real edge of that formula depends on the target: 0.01%
+at 1.01×, 0.5% at 2×, close to 1% only at high targets.
 
 ## Audit
 
-`python server/audit.py` runs a 1,000,000-round Monte-Carlo check:
+`python server/audit.py` first checks that Crash returns the same multipliers as
+the TON contract, that the seed chain and its published hash are correct, and that
+a cash-out at the crash point wins. Then it runs a 1,000,000-round Monte-Carlo check:
 
 ```
-Instant crash (1.00x): 1.01%   (target 1.00%)
-Median: 1.98x                  (theory ~2.00x)
-P(crash >=   2x) = 49.75%      (theory 49.50%)
-P(crash >= 100x) =  0.99%      (theory  0.99%)
+Return to player at auto-cashout targets (fair = 0.9900):
+   1.01x  ->  RTP = 0.9898
+   2.00x  ->  RTP = 0.9896
+  10.00x  ->  RTP = 0.9902
+
+Instant crash (1.00x): 2.00%  (theory 1.98%)
+Median: 1.97x  (theory 1.98x)
+  P(crash >=   2x) = 49.48%  (theory 49.50%)
+  P(crash >= 100x) =  0.99%  (theory  0.99%)
 ```
 
 The browser verifier and the Python server produce byte-identical output for

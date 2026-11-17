@@ -29,6 +29,13 @@ def uniform(server_seed: str, client_seed: str, nonce: int) -> int:
     return int(hmac_hex(server_seed, client_seed, nonce)[: _BITS // 4], 16)
 
 
+def crash_uniform(server_seed: str, client_seed: str, nonce: int) -> int:
+    """Top 52 bits of SHA256("server:client:nonce"), exactly as the TON contract
+    (ton-abyss) computes them, so the contract can check any Crash round."""
+    digest = hashlib.sha256(f"{server_seed}:{client_seed}:{nonce}".encode()).hexdigest()
+    return int(digest[: _BITS // 4], 16)
+
+
 def verify(server_seed: str, expected_commitment: str) -> bool:
     return hmac.compare_digest(commitment(server_seed), expected_commitment)
 
@@ -50,4 +57,8 @@ class SeedChain:
 
     @property
     def terminating_hash(self) -> str:
-        return hashlib.sha256(self.seeds[-1].encode()).hexdigest()
+        """The one hash to publish before play: SHA256 of the first seed played.
+        Every later seed hashes to the one played before it, so this commits to the
+        whole chain without revealing any of it. (It used to hash the last seed,
+        which is itself a seed of the chain and gave away every round before it.)"""
+        return hashlib.sha256(self.seeds[0].encode()).hexdigest()

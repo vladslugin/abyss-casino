@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from provably_fair import SeedChain, commitment, uniform
+from provably_fair import SeedChain, commitment, crash_uniform
 
 _MAX = 2 ** 52
 
 
 def crash_point(server_seed: str, client_seed: str, nonce: int) -> float:
-    """Multiplier for one round. 1% house edge folded into the distribution
-    via the exact closed form: floor((100*E - h)/(E - h)) / 100."""
-    h = uniform(server_seed, client_seed, nonce) or 1
-    x100 = (100 * _MAX - h) // (_MAX - h)
-    return max(100, x100) / 100.0
+    """Multiplier for one round, the same as the TON contract: floor(0.99 / (1 - u))
+    in hundredths, at least 1.00x. P(crash >= t) = 0.99 / t, so every cash-out target
+    has the same 1% edge."""
+    h = crash_uniform(server_seed, client_seed, nonce)
+    return max(100, 99 * _MAX // (_MAX - h)) / 100.0
 
 
 @dataclass
@@ -36,7 +36,8 @@ class Round:
         out = {}
         for b in self.bets:
             cash = b.cashed_at if b.cashed_at is not None else b.auto_cashout
-            out[b.player] = round(b.amount * cash, 2) if cash and cash < self.crash else 0.0
+            # Cashing out exactly at the crash point wins, as in the contract.
+            out[b.player] = round(b.amount * cash, 2) if cash and cash <= self.crash else 0.0
         return out
 
 

@@ -268,6 +268,8 @@ async function startRound(){
 function loop(){
   const ms=performance.now()-state.startT; let m=multAt(ms);
   humSet(m, !state.cashedAt);
+  // Auto cash-out first: a target equal to the crash point wins, as in the contract.
+  if(!state.cashedAt && state.autoX<=state.crashAt && m>=state.autoX) cashOut(state.autoX);
   if(m>=state.crashAt){
     m=state.crashAt;
     $("#multVal").textContent=m.toFixed(2)+"×"; $("#multVal").className="crashed";
@@ -282,7 +284,6 @@ function loop(){
       if(performance.now()<end) requestAnimationFrame(crashAnim); else drawScene(m,'crash'); })();
     endRound(); return;
   }
-  if(!state.cashedAt && m>=state.autoX) cashOut(state.autoX);
   const fl=Math.floor(m);
   if(soundOn && !state.cashedAt && fl!==lastTickInt && [2,3,5,7,10,15,20,30,50].includes(fl)){ lastTickInt=fl; sndTick(fl); }
   const mode=state.cashedAt?'safe':'dive';
@@ -295,7 +296,7 @@ function loop(){
 function cashOut(atX){
   if(state.cashedAt||!state.roundActive) return;
   const x=atX||multAt(performance.now()-state.startT);
-  if(x>=state.crashAt) return;
+  if(x>state.crashAt) return;
   state.cashedAt=x; const win=state.bet*x; state.balance+=win; updateBal();
   $("#betBtn").textContent="Dive"; $("#betBtn").className="bet"; $("#betBtn").disabled=true;
   setPhase(`+${win.toFixed(2)} @ ${x.toFixed(2)}×`,"safe");

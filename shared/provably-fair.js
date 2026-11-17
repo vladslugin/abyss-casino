@@ -18,13 +18,14 @@ async function hmacSha256Hex(key, msg) {
 
 const commitment = (serverSeed) => sha256Hex(serverSeed);
 
+// Crash uses SHA256("server:client:nonce") and floor(0.99 / (1 - u)), exactly like
+// the TON contract (ton-abyss), so its crashPoint getter returns the same multiplier
+// for a revealed seed. P(crash >= t) = 0.99 / t: a 1% edge for every target.
 async function crashPoint(serverSeed, clientSeed, nonce) {
-  const digest = await hmacSha256Hex(serverSeed, `${clientSeed}:${nonce}`);
-  let h = BigInt("0x" + digest.slice(0, Number(BITS) / 4));
-  if (h === 0n) h = 1n;
-  let x100 = (100n * MAX - h) / (MAX - h);
-  if (x100 < 100n) x100 = 100n;
-  return Number(x100) / 100;
+  const digest = await sha256Hex(`${serverSeed}:${clientSeed}:${nonce}`);
+  const h = BigInt("0x" + digest.slice(0, Number(BITS) / 4));
+  const x100 = (99n * MAX) / (MAX - h);
+  return Number(x100 < 100n ? 100n : x100) / 100;
 }
 
 // Two dice (1-6 each) from one round HMAC.
